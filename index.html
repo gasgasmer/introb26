@@ -1,0 +1,873 @@
+<!DOCTYPE html>
+<html lang="hu">
+<head>
+    <meta charset="UTF-8">
+    <title>Interaktív 3D Mars Térkép</title>
+    <style>
+        /* Alapvető oldalbeállítások: nincs margó, fekete háttér, görgetősáv elrejtése */
+        body { margin: 0; overflow: hidden; background-color: #050505; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        
+        /* Egyedi görgetősáv formázása (Webkit böngészőkhöz, pl. Chrome, Safari) */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.4); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; border: 1px solid #333; }
+        ::-webkit-scrollbar-thumb:hover { background: #4fa4ff; }
+
+        /* Bal oldali információs panel stílusa */
+        #ui-left { position: absolute; top: 20px; left: 20px; background: rgba(0,0,0,0.85); padding: 20px; border-radius: 8px; z-index: 10; box-shadow: 0 4px 15px rgba(0,0,0,0.8); width: 300px; max-height: calc(100vh - 160px); overflow-y: auto; border: 1px solid #333; }
+        
+        /* Jobb oldali vezérlőpanel stílusa */
+        #ui-right { position: absolute; top: 20px; right: 20px; background: rgba(0,0,0,0.85); padding: 20px; border-radius: 8px; z-index: 10; box-shadow: 0 4px 15px rgba(0,0,0,0.8); width: 280px; max-height: calc(100vh - 160px); overflow-y: auto; border: 1px solid #333; }
+        
+        /* Kisebb címsorok stílusa a paneleken belül */
+        h3 { margin-top: 0; font-size: 16px; padding-bottom: 5px; color: #4fa4ff; text-transform: uppercase; letter-spacing: 1px; }
+        .control-group { margin-bottom: 15px; } /* Beállítások blokkjainak térköze */
+        
+        /* Csúszkák (range) stílusa - Teljes felülírás a Safari sötét háttér miatti láthatatlansága ellen */
+        input[type=range] {
+            -webkit-appearance: none; /* Gyári Apple/böngésző stílus letiltása */
+            width: 100%;
+            background: transparent;  /* A csúszka mögötti terület legyen átlátszó */
+            margin: 10px 0;
+        }
+        /* A csúszka háttere/vonalrésze (Chrome/Safari) */
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 6px; cursor: pointer; background: #555555; border-radius: 3px;
+        }
+        /* A mozgatható gomb (Chrome/Safari) */
+        input[type=range]::-webkit-slider-thumb {
+            height: 18px; width: 18px; border-radius: 50%; background: #ff4500; cursor: pointer;
+            -webkit-appearance: none; margin-top: -6px; border: 2px solid #ffffff;
+        }
+        /* A csúszka háttere/vonalrésze (Firefox) */
+        input[type=range]::-moz-range-track {
+            width: 100%; height: 6px; cursor: pointer; background: #555555; border-radius: 3px;
+        }
+        /* A mozgatható gomb (Firefox) */
+        input[type=range]::-moz-range-thumb {
+            height: 18px; width: 18px; border-radius: 50%; background: #ff4500; cursor: pointer; border: 2px solid #ffffff;
+        }
+        
+        /* Egyéb beviteli mezők stílusai */
+        input[type=color] { cursor: pointer; background: transparent; border: none; }
+        label { font-size: 13px; display: flex; align-items: center; cursor: pointer; }
+        input[type=checkbox] { margin-right: 8px; width: 16px; height: 16px; cursor: pointer; accent-color: #ff4500; }
+        
+        /* Interaktív gombok stílusa (nézetek, térképek) */
+        .view-btn { padding: 6px; background: #222; color: white; border: 1px solid #444; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; font-size: 12px; font-weight: bold;}
+        .view-btn:hover { background: #4fa4ff; color: #000; border-color: #4fa4ff; }
+
+        /* Szöveges tartalmak formázása a bal oldali infópanelen */
+        .info-title { font-size: 26px; font-weight: bold; color: #ff5722; margin-bottom: 0px; text-align: center; }
+        .mars-symbol { font-size: 28px; color: #ff5722; }
+        .info-subtitle { font-size: 14px; color: #aaa; text-align: center; margin-bottom: 15px; border-bottom: 1px solid #333; padding-bottom: 10px; }
+        .fact-box { margin-bottom: 12px; font-size: 14px; line-height: 1.4; }
+        .fact-title { color: #4fa4ff; font-weight: bold; display: inline; } 
+        .earth-comp { font-size: 12px; color: #8bc34a; font-style: italic; display: block; margin-top: 2px; } /* Földi összehasonlítás szövege */
+        
+        /* Alsó idővonal tartóeleme és grafikai megjelenése */
+        #timeline-wrapper { position: absolute; bottom: 0; left: 0; width: 100%; height: 90px; background: linear-gradient(transparent, rgba(0,0,0,0.9)); z-index: 20; }
+        #timeline-container { position: absolute; bottom: 30px; left: 5%; width: 90%; height: 2px; background: #555; } /* A fő vízszintes vonal */
+        
+        /* Idővonalon lévő interaktív pöttyök és felirataik */
+        .timeline-point { position: absolute; top: -4px; width: 10px; height: 10px; background: #4fa4ff; border-radius: 50%; cursor: pointer; transform: translateX(-50%); transition: all 0.2s; box-shadow: 0 0 5px #4fa4ff; }
+        .timeline-point:hover { transform: translateX(-50%) scale(1.5); background: #ff5722; box-shadow: 0 0 10px #ff5722; }
+        .timeline-label { position: absolute; top: -35px; transform: translateX(-50%); font-size: 11px; color: #aaa; text-align: center; white-space: nowrap; pointer-events: none; line-height: 1.2; }
+        
+        /* Lebegő információs ablak (Tooltip), ami egérmutatáskor jelenik meg az idővonal felett */
+	#timeline-tooltip { position: absolute; background: rgba(0,0,0,0.9); border: 1px solid #4fa4ff; color: white; padding: 12px 15px; border-radius: 6px; font-size: 13px; z-index: 100; opacity: 0; transition: opacity 0.2s; pointer-events: none; width: 350px; line-height: 1.5; white-space: normal; box-shadow: 0 4px 10px rgba(0,0,0,0.5); transform: translateX(-50%); }
+        
+        /* Középső töltőképernyő felirata */
+        #loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 24px; font-weight: bold; color: #4fa4ff; z-index: 100; }
+        
+        /* Rétegek a HTML alapú feliratokhoz */
+        #labels-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        .longitude-label { position: absolute; color: #ccc; font-size: 11px; font-weight: bold; transform: translate(-50%, -50%); text-shadow: 1px 1px 3px black, -1px -1px 3px black; transition: opacity 0.2s; }
+
+        /* Mobil figyelmeztető képernyő (alapból rejtett, flexbox a középre igazításhoz) */
+        #mobile-warning { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #050505; z-index: 10000; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 20px; box-sizing: border-box; }
+        
+        /* Média lekérdezés: 850px alatti képernyőszélességnél aktiválódik a mobil nézet */
+        @media (max-width: 850px) {
+            #mobile-warning { display: flex; } /* Figyelmeztetés megjelenítése */
+            #ui-left, #ui-right, #timeline-wrapper { display: none !important; } /* UI elemek elrejtése */
+        }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="mobile-warning">
+        <div style="font-size: 50px; margin-bottom: 15px;">📱<span style="color:#ff5722; margin: 0 10px;">➔</span>💻</div>
+        <h2 style="color: #ff5722; margin-top: 0;">Túl kicsi a képernyő</h2>
+        <p style="font-size: 16px; line-height: 1.5; max-width: 400px;">Ez az interaktív 3D Mars térkép asztali számítógépekre és tabletekre lett optimalizálva.</p>
+        <p style="color: #aaa; font-size: 14px; margin-top: 20px;">Kérjük, nyissa meg a weboldalt egy nagyobb felbontású eszközön,<br>vagy <strong>forgassa el a készülékét fekvő nézetbe!</strong></p>
+    </div>
+
+    <div id="loading">Térkép feldolgozása...</div> 
+    <div id="labels-container"></div> <div id="ui-left" style="display: none;">
+        <div class="info-title">MARS <span class="mars-symbol">♂</span></div>
+        <div class="info-subtitle">A vörös bolygó</div>
+        
+         <div class="fact-box">
+            <span class="fact-title">Átmérő (egyenlítőnél):</span> 6 779 km
+            <span class="earth-comp">(Földhöz képest: kb. fele, 53%.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Tömeg:</span> 6,39 × 10²³ kg
+            <span class="earth-comp">(Földhöz képest: alig 11%.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Gravitáció:</span> 3,72 m/s²
+            <span class="earth-comp">(Földhöz képest: kb. egyharmad (38%). Aki a Földön 1 méter magasra ugrik, a Marson ugyanakkora erővel 2,6 méterre ugrana.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Naptól mért átlagos távolság:</span> 227,9 millió km
+            <span class="earth-comp">(Földhöz képest: kb. másfélszer messzebb, 1,52 CsE.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Hőmérséklet:</span> Átlagosan -60 °C<br>
+            (végletek: -153 °C-tól +20 °C-ig)
+            <span class="earth-comp">(Földhöz képest: sokkal hidegebb, de a nyári egyenlítői nappalokon kellemes tavaszi idő is lehet.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Légkör sűrűsége:</span> Nagyon ritka
+            <span class="earth-comp">(Földhöz képest: a légnyomás alig 6 ezreléke a földinek.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Légkör összetétele:</span> ~95% szén-dioxid, ~3% nitrogén, ~1,6% argon
+            <span class="earth-comp">(Földhöz képest: a Marson nem tudnánk lélegezni, nincs oxigén, a szén-dioxid pedig mérgező mennyiség.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Tengelyferdeség (dőlésszög):</span> 25,2°
+            <span class="earth-comp">(Földhöz képest: jelenleg nagyon hasonló a Föld 23,5°-os dőléséhez. Viszont mivel a Marsnak nincs egy nagy, stabilizáló holdja, a dőlésszöge évmilliók alatt 0° és 60° között kaotikusan változik, ami drasztikus klímaváltozásokat okoz.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Nap körüli keringési idő:</span> 687 földi nap
+            <span class="earth-comp">(Földhöz képest: majdnem kétszer olyan hosszú egy év.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Egy nap hossza (sol):</span> 24 óra 37 perc
+            <span class="earth-comp">(Földhöz képest: szinte megegyező.)</span>
+        </div>
+        <div class="fact-box">
+            <span class="fact-title">Holdak száma:</span> 2 (Phobos és Deimos)
+            <span class="earth-comp">(Földhöz képest: a Mars két holdja a mienkhez képest apró, szabálytalan aszteroida.)</span>
+        </div>
+    </div>
+
+    <div id="ui-right" style="display: none;">
+        <div class="info-title" style="color: #4fa4ff; margin-bottom: 20px; font-size: 20px;">BEÁLLÍTÁSOK</div>
+
+        <div class="control-group">
+            <label style="display:block; margin-bottom:5px;">Szintvonalak száma: <strong id="stepsValue">12</strong></label>
+            <input type="range" id="stepsSlider" min="2" max="25" value="12" step="1">
+        </div>
+        <div class="control-group">
+            <label style="display:block; margin-bottom:5px;">Hosszúsági körök száma: <strong id="lonResValue">12</strong></label>
+            <input type="range" id="lonResSlider" min="4" max="36" value="12" step="2">
+        </div>
+        <div class="control-group">
+            <label style="display:block; margin-bottom:5px;">Szélességi körök száma: <strong id="latResValue">5</strong></label>
+            <input type="range" id="latResSlider" min="0" max="9" value="3" step="1">
+        </div>
+
+        <div class="control-group" style="display: flex; flex-direction: column; gap: 6px;">
+            <label><input type="checkbox" id="showGrid" checked> Szélességi és hosszúsági körök</label>
+            <label><input type="checkbox" id="showLabels" checked> Szögek feliratozása</label>
+            <label><input type="checkbox" id="showLanders"> Leszállóhelyek megjelenítése</label> 
+        </div>
+
+        <div class="control-group" style="margin-top: 25px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                <label style="margin:0;">Magasság pásztázása: <strong id="targetLayerValue"></strong></label>
+                <input type="color" id="highlightColor" value="#ffffff" style="width: 20px; height: 20px; padding: 0; border: none; cursor: pointer;" title="Vonal színe">
+            </div>
+            <input type="range" id="targetLayerSlider" min="0" max="100" value="28" step="1">
+            <div style="font-size:10px; color:#aaa; margin-top: 3px; line-height: 1.3;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:5px;">
+                    <span>Legalacsonyabb pont</span><span>Legmagasabb pont</span>
+                </div>
+                <div style="color: #ff5722; font-style: italic;">*0 km a Mars egyenlítői átlagsugarának szintje (areoid)</div>
+            </div>
+        </div>
+        
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 15px; margin-bottom: 10px; padding-bottom: 10px;">
+            <h3 style="margin: 0; border: none; padding: 0; padding-right: 15px;">Térkép:</h3>
+            <div style="display: flex; gap: 8px; flex: 1;">
+                <button id="btnTopoMap" class="view-btn" style="flex: 1; background: #4fa4ff; color: #000; border-color: #4fa4ff;" title="Domborzati térkép be/ki">Topo</button>
+                <button id="btnTextureMap" class="view-btn" style="flex: 1; color: #e25822;" title="Textúra térkép be/ki">Textúra</button> 
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; padding-bottom: 5px;">
+            <h3 style="margin: 0; border: none; padding: 0;">Nézet:</h3>
+            <div style="display: flex; gap: 8px;">
+                <button id="btnEquator" class="view-btn" title="Egyenlítői nézet">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none">
+                        <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                    </svg>
+                </button>
+                <button id="btnTilted" class="view-btn" title="Dőlt (ekvatoriális) nézet">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2" fill="none">
+                        <g transform="rotate(25 12 12)">
+                            <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/>
+                        </g>
+                    </svg>
+                </button>
+                <button id="btnNorth" class="view-btn" title="Északi-sark felöli nézet">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="1" fill="none">
+                        <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                        <line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/><line x1="4.93" y1="19.07" x2="19.07" y2="4.93"/>
+                        <circle cx="12" cy="12" r="4" fill="#ff5722" stroke="#ff5722"/>
+                    </svg>
+                </button>
+                <button id="btnSouth" class="view-btn" title="Déli-sark felöli nézet">
+                    <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="1" fill="none">
+                        <circle cx="12" cy="12" r="10" stroke-width="2"/>
+                        <line x1="12" y1="2" x2="12" y2="22"/><line x1="2" y1="12" x2="22" y2="12"/>
+                        <line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/><line x1="4.93" y1="19.07" x2="19.07" y2="4.93"/>
+                        <circle cx="12" cy="12" r="4" fill="#4fa4ff" stroke="#4fa4ff"/>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="control-group">
+            <label><input type="checkbox" id="lockTilt"> Csak tengelyforgás</label>
+        </div>
+    </div>
+
+    <div id="timeline-tooltip"></div> 
+    <div id="timeline-wrapper">
+        <div id="timeline-container">
+            <div class="timeline-point" style="left: 7.7%;" data-index="0" data-info="<strong>1965 - Mariner 4:</strong> A NASA űrszondája volt az első, amely sikeresen elrepült a Mars mellett. A mindössze 21 darab homályos, fekete-fehér fotó sokkolta a tudósokat, mert csatornák és növényzet helyett egy halott, kráteres sivatagot mutattak, és kiderült, hogy a bolygónak nincs védő mágneses tere."></div>
+            <div class="timeline-label" style="left: 7.7%;"><strong>1965</strong><br>Mariner 4</div>
+            
+            <div class="timeline-point" style="left: 16.9%;" data-index="1" data-info="<strong>1971 - Mars 3 & Mariner 9:</strong> A történelmi elsőséget a szovjet Mars 3 szerezte meg, mint az első puhán landoló eszköz a felszínen, ám egy gigantikus porvihar miatt mindössze 14 másodpercig tudott adatokat küldeni. Eközben az amerikai Mariner 9 lett az első Mars körüli műhold, amely feltérképezte a Naprendszer legnagyobb vulkánját, az Olympus Mons-t, és a legnagyobb kanyonrendszerét, a 4500 km hosszú Valles Marineris-t."></div>
+            <div class="timeline-label" style="left: 16.9%;"><strong>1971</strong><br>Mars 3 & M. 9</div>
+            
+            <div class="timeline-point" style="left: 24.6%;" data-index="2" data-info="<strong>1976 - Viking 1 & 2:</strong> Ezek voltak az első teljesen sikeres, hosszú távú amerikai leszállóegységek, amelyek éveken át működtek és küldték az első színes panorámaképeket. Fő céljuk az élet keresése volt, ezért egy miniatűr biológiai labort is vittek magukkal, de a marsi talaj vizsgálata hivatalosan csak extrém kémiai reakciókat mutatott ki, biológiai életet nem."></div>
+            <div class="timeline-label" style="left: 24.6%;"><strong>1976</strong><br>Viking 1 & 2</div>
+            
+            <div class="timeline-point" style="left: 56.9%;" data-index="3" data-info="<strong>1997 - Pathfinder & Sojourner:</strong> Ez a forradalmi küldetés vitte a Marsra az első mozgó robotot, a mikrohullámú sütő méretű Sojourner marsjárót. A leszállás is különleges volt, hiszen rakéták helyett egy hatalmas légzsákrendszerrel pattogott végig a felszínen, mire megállt. A marsi című, jövőben játszódó regényben ezt a szondát használta Mark Watney a kommunikáció megteremtésére a Földdel."></div>
+            <div class="timeline-label" style="left: 56.9%;"><strong>1997</strong><br>Pathfinder</div>
+            
+            <div class="timeline-point" style="left: 67.7%;" data-index="4" data-info="<strong>2004 - Spirit & Opportunity:</strong> A bolygó két ellentétes oldalán landoló iker marsjárók megdönthetetlen geológiai bizonyítékokat találtak az egykori sós vizű tengerekre és hévízforrásokra. A Spirit 6 év után fagyott meg egy homokcsapdában, míg az eredetileg 90 naposra tervezett Opportunity hihetetlen módon 15 évig működött, amíg egy bolygóméretű porvihar be nem temette."></div>
+            <div class="timeline-label" style="left: 67.7%;"><strong>2004</strong><br>Spirit & Opp.</div>
+            
+            <div class="timeline-point" style="left: 80.0%;" data-index="5" data-info="<strong>2012 - Curiosity:</strong> A NASA egy egytonnás, kisautó méretű, nukleáris hajtású laboratóriuma, ami a Gale-kráterben landolt, amit súlya miatt egy futurisztikus, rakétás „égi daru” engedett le a felszínre. Küldetése során egy ősi édesvízű tómedret és bonyolult szerves molekulákat fedezett fel, bizonyítva, hogy a Mars egykor alkalmas lehetett a mikrobális életre."></div>
+            <div class="timeline-label" style="left: 80.0%;"><strong>2012</strong><br>Curiosity</div>
+            
+            <div class="timeline-point" style="left: 89.2%;" data-index="6" data-info="<strong>2018 - InSight:</strong> Ez a fix geofizikai mérőállomás nem mozgott, hanem a bolygó belső szerkezetét kutatta. Szeizmométerével több mint 1300 „marsrengést” rögzített, ami bizonyította, hogy a bolygó geológiailag nem teljesen halott, bár felszín alatti mélyfúró egysége a vártnál keményebb talaj miatt elakadt."></div>
+            <div class="timeline-label" style="left: 89.2%;"><strong>2018</strong><br>InSight</div>
+            
+            <div class="timeline-point" style="left: 93.8%;" data-index="7" data-info="<strong>2021 - Perseverance & Ingenuity:</strong> A Curiosity továbbfejlesztett utódja egy kiszáradt folyódeltában landolt, hogy múltbeli életnyomokat keressen, és kőzetmintákat csomagoljon el egy jövőbeli földi expedíció számára. Magával vitt egy kis drónt is (Ingenuity), amely az emberiség történetének első motoros repülését hajtotta végre egy idegen bolygón."></div>
+            <div class="timeline-label" style="left: 93.8%;"><strong>2021</strong><br>Perseverance</div>
+        </div>
+    </div>
+
+    <script>
+        // =========================================================================
+        // KÜLSŐ FÁJLOK ELÉRÉSI ÚTJA
+        // =========================================================================
+        const mars_topo_url = "Mars_topo.jpg"; 
+        // =========================================================================
+        const mars_texture_url = "Mars_texture.jpg"; 
+        // =========================================================================
+        
+        // A térképek kezdőpontjának összehangolása (Marsi nullmeridián korrekciója)
+        const TOPO_MAP_LEFT_LONGITUDE = 202.5; 
+        const TEXTURE_MAP_LEFT_LONGITUDE = 180.0; 
+
+        // Történelmi leszállóhelyek földrajzi koordinátái fokban (szélesség, hosszúság)
+        const landingSites = [
+            { id: 1, lat: -45, lon: 202 },         // Mars 3 (1971)
+            { id: 2, lat: 22.48, lon: 312.03 },    // Viking 1 (1976)
+            { id: 2, lat: 47.97, lon: 134.26 },    // Viking 2 (1976)
+            { id: 3, lat: 19.13, lon: 326.78 },    // Pathfinder (1997)
+            { id: 4, lat: -14.56, lon: 175.47 },   // Spirit (2004)
+            { id: 4, lat: -1.94, lon: 354.47 },    // Opportunity (2004)
+            { id: 5, lat: -4.58, lon: 137.44 },    // Curiosity (2012)
+            { id: 6, lat: 4.5, lon: 135.6 },       // InSight (2018)
+            { id: 7, lat: 18.44, lon: 77.45 }      // Perseverance (2021)
+        ];
+
+        // 3D tér alapjainak inicializálása
+        const scene = new THREE.Scene(); // Virtuális tér létrehozása
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.1, 1000); // Kamera beállítása
+        camera.position.z = 3.6; // Kamera távolsága a bolygótól
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); // Élsimítás és átlátszó háttér engedélyezése
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement); // A 3D vászon (canvas) hozzáadása a weblaphoz
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement); // Egérrel forgatható kamera vezérlés
+        controls.enablePan = false; // A bolygó eltolásának tiltása (csak forgatni lehessen)
+        controls.target.set(0, 0, 0); // Fókuszpont a középpontban
+
+        let marsGroup = new THREE.Group(); // Ebbe a csoportba kerül a bolygó és az összes felszíni elem
+        scene.add(marsGroup);
+
+        // Globális változók a térkép vezérléséhez
+        let sphere; // Maga a 3D gömb (mesh)
+        let labelElements = []; // Szélességi és hosszúsági HTML feliratok tömbje
+        let landerElements = []; // Leszállóhelyek 3D Körlap objektumainak tömbje
+        let currentLonRes = 0; // Jelenlegi feliratfelbontás tárolása (hogy ne rajzolja újra feleslegesen)
+        let currentLatRes = -1; 
+        let mapState = { topo: true, texture: false }; // Melyik térképnézet van épp bekapcsolva
+
+        // UI Elemek összekötése a JavaScripttel
+        const stepsSlider = document.getElementById('stepsSlider');
+        const targetSlider = document.getElementById('targetLayerSlider');
+        const highlightColorPicker = document.getElementById('highlightColor');
+        const showGrid = document.getElementById('showGrid'); 
+        const showLabels = document.getElementById('showLabels'); 
+        const showLanders = document.getElementById('showLanders'); 
+        const lonResSlider = document.getElementById('lonResSlider');
+        const latResSlider = document.getElementById('latResSlider'); 
+        const lockTilt = document.getElementById('lockTilt');
+
+        // UI Gombok összekötése
+        const btnTopoMap = document.getElementById('btnTopoMap');
+        const btnTextureMap = document.getElementById('btnTextureMap');
+        const btnEquator = document.getElementById('btnEquator');
+        const btnTilted = document.getElementById('btnTilted');
+        const btnNorth = document.getElementById('btnNorth');
+        const btnSouth = document.getElementById('btnSouth');
+
+        // Színkód (#RRGGBB) átalakítása a WebGL shader által értelmezhető formátumra (0.0 - 1.0)
+        function hexToRgb(hex) {
+            const r = parseInt(hex.slice(1, 3), 16) / 255;
+            const g = parseInt(hex.slice(3, 5), 16) / 255;
+            const b = parseInt(hex.slice(5, 7), 16) / 255;
+            return new THREE.Vector3(r, g, b);
+        }
+
+        // Dinamikusan legenerálja a szélességi és hosszúsági körök HTML feliratait
+        function buildLabels(lonRes, latLinesCount) {
+            if(!sphere) return;
+            const container = document.getElementById('labels-container');
+            container.innerHTML = ''; // Régi feliratok törlése
+            
+            // Korábbi láthatatlan 3D horgonypontok eltávolítása a gömbről
+            labelElements.forEach(item => sphere.remove(item.anchor));
+            labelElements = [];
+            
+            // Hosszúsági körök (0°-360°) feliratainak létrehozása
+            for(let i = 0; i < lonRes; i++) {
+                let div = document.createElement('div');
+                div.className = 'longitude-label';
+                div.innerText = Math.round(i * (360 / lonRes)) + '°'; 
+                container.appendChild(div);
+                
+                let anchor = new THREE.Object3D(); // Láthatatlan 3D pont, ehhez tapad majd a HTML szöveg
+                anchor.position.setFromSphericalCoords(1.05, Math.PI / 2, (i / lonRes) * Math.PI * 2);
+                sphere.add(anchor); 
+                labelElements.push({ div: div, anchor: anchor });
+            }
+
+            // Szélességi körök (Északi/Déli félteke) feliratainak létrehozása
+            if (latLinesCount > 0) {
+                if (latLinesCount === 1) { // Ha csak egy van, az az Egyenlítő
+                    let div = document.createElement('div');
+                    div.className = 'longitude-label';
+                    div.innerText = '0°';
+                    container.appendChild(div);
+                    let anchor = new THREE.Object3D();
+                    anchor.position.setFromSphericalCoords(1.05, Math.PI / 2, 0); 
+                    sphere.add(anchor);
+                    labelElements.push({ div: div, anchor: anchor });
+                } else {
+                    // Több szélességi kör elosztása arányosan
+                    let spacing = 1.0 / (latLinesCount + 1);
+                    for(let i = 1; i <= latLinesCount; i++) {
+                        let latDeg = Math.round((0.5 - (i * spacing)) * 180);
+                        if (latDeg === 0) continue; // A 0 fokot kihagyjuk, hogy ne ütközzön a hosszúságival
+                        
+                        let div = document.createElement('div');
+                        div.className = 'longitude-label';
+                        div.innerText = latDeg > 0 ? latDeg + '°É' : Math.abs(latDeg) + '°D'; // Észak/Dél jelölés
+                        container.appendChild(div);
+                        
+                        let anchor = new THREE.Object3D();
+                        let phi = i * spacing * Math.PI;
+                        anchor.position.setFromSphericalCoords(1.05, phi, 0); 
+                        sphere.add(anchor);
+                        labelElements.push({ div: div, anchor: anchor });
+                    }
+                }
+            }
+        }
+
+        // Leszállóhelyek inicializálása valódi 3D Körlapként a gömb felszínén
+        function initLanders() {
+            const landerGeo = new THREE.CircleGeometry(0.015, 16); // Egy apró, 16 szegmensű körlap geometria
+            
+            landingSites.forEach(site => {
+                // Színezés, a DoubleSide fontos, hogy mindkét oldalról látszódjon a körlap
+                let landerMat = new THREE.MeshBasicMaterial({ color: 0x4fa4ff, side: THREE.DoubleSide });
+                let mesh = new THREE.Mesh(landerGeo, landerMat);
+
+                // Földrajzi (szélesség/hosszúság) koordináták átszámítása 3D gömbi koordinátákra (Radián)
+                let phi = (90 - site.lat) * Math.PI / 180;
+                let theta = site.lon * Math.PI / 180;
+                
+                // Ráillesztés a felszínre egy minimális (1.002) kiemeléssel a villódzás (z-fighting) ellen
+                mesh.position.setFromSphericalCoords(1.002, phi, theta);
+                // A körlap elforgatása, hogy tökéletesen rásimuljon a gömb görbületére
+                mesh.lookAt(mesh.position.clone().multiplyScalar(2));
+                
+                // Egyedi adatok mentése a mesh-be a későbbi hover effektushoz
+                mesh.userData = { id: site.id, baseColor: 0x4fa4ff, hoverColor: 0xff5722 };
+                mesh.visible = showLanders.checked; // Láthatóság beállítása a UI checkbox alapján
+
+                sphere.add(mesh); // Gömbhöz kötés, így azonnal, késleltetés nélkül forog vele
+                landerElements.push({ mesh: mesh, site: site });
+            });
+        }
+
+        // Átmeneti, üres textúra generálása a memóriába, amíg a nagy kép be nem tölt
+        function createDummyTexture(colorHex) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 2; canvas.height = 2;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = colorHex;
+            ctx.fillRect(0, 0, 2, 2);
+            return new THREE.CanvasTexture(canvas);
+        }
+
+        // Textúra beállítás: Engedélyezi a vízszintes ismétlődést a varrás / szakadás (seam) javításához a 0 meridiánnál
+        function applyTextureSettings(tex) {
+            tex.wrapS = THREE.RepeatWrapping; // Ismétlődés vízszintesen (X tengely)
+            tex.wrapT = THREE.ClampToEdgeWrapping; // Nincs ismétlődés függőlegesen a sarkoknál
+        }
+
+        // Betölti a megadott képeket a memóriába
+        function initGlobe() {
+            const loader = new THREE.TextureLoader();
+            let tTopo, tTex;
+            let loadedCount = 0;
+
+            // Csak akkor építi fel a bolygót, ha mindkét textúra (vagy a dummy) betöltött
+            function checkReady() {
+                loadedCount++;
+                if(loadedCount === 2) {
+                    buildGlobeAndShader(tTopo, tTex);
+                    initLanders(); 
+                }
+            }
+
+            // Topográfiai (fekete-fehér) térkép betöltése
+            if (mars_topo_url) {
+                tTopo = loader.load(mars_topo_url, (tex) => {
+                    applyTextureSettings(tex); 
+                    checkReady();
+                });
+            } else {
+                tTopo = createDummyTexture('#888888');
+                applyTextureSettings(tTopo);
+                checkReady();
+            }
+
+            // Színes vizuális textúra betöltése
+            if (mars_texture_url) {
+                tTex = loader.load(mars_texture_url, (tex) => {
+                    applyTextureSettings(tex);
+                    checkReady();
+                });
+            } else {
+                tTex = createDummyTexture('#cc6633');
+                applyTextureSettings(tTex);
+                checkReady();
+            }
+        }
+
+        // A bolygó 3D geometriájának és az egyedi megjelenítő programnak (Shader) a felépítése
+        function buildGlobeAndShader(tTopo, tTex) {
+            const customMaterial = new THREE.ShaderMaterial({
+                extensions: { derivatives: true }, // Szükséges a vonalvastagság dinamikus számításához (fwidth)
+                uniforms: {
+                    tTopo: { value: tTopo }, // Topo textúra átadása a shadernek
+                    tTexture: { value: tTex }, // Színes textúra átadása
+                    topoOffset: { value: TOPO_MAP_LEFT_LONGITUDE / 360.0 }, // Nullmeridián eltolása
+                    textureOffset: { value: TEXTURE_MAP_LEFT_LONGITUDE / 360.0 }, 
+                    showTopo: { value: 1.0 }, // Domborzati nézet kapcsolója
+                    showTexture: { value: 0.0 }, // Színes textúra kapcsolója
+                    steps: { value: parseFloat(stepsSlider.value) }, // Szintvonalak száma
+                    highlightLevel: { value: parseFloat(targetSlider.value) / 100.0 }, // Kiemelt magasság (0.0 - 1.0)
+                    hlColor: { value: hexToRgb(highlightColorPicker.value) }, // Kiemelés színe
+                    hlThick: { value: 1.0 }, // Kiemelés vastagsága
+                    showGrid: { value: showGrid.checked ? 1.0 : 0.0 }, // Rács láthatósága
+                    lonRes: { value: parseFloat(lonResSlider.value) }, // Hosszúsági körök sűrűsége
+                    latRes: { value: 0.0 } // Szélességi körök sűrűsége
+                },
+                // Vertex Shader: Kiszámolja a 3D pontok képernyőn elfoglalt helyét
+                vertexShader: `
+                    varying vec2 vUv;
+                    void main() {
+                        vUv = uv;
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                `,
+                // Fragment Shader: Kiszámolja minden egyes pixel pontos színét a gömb felszínén
+                fragmentShader: `
+                    uniform sampler2D tTopo;
+                    uniform sampler2D tTexture;
+                    uniform float topoOffset;
+                    uniform float textureOffset;
+                    uniform float showTopo;
+                    uniform float showTexture;
+                    uniform float steps;
+                    uniform float highlightLevel;
+                    uniform vec3 hlColor;
+                    uniform float hlThick;
+                    uniform float showGrid;
+                    uniform float lonRes;
+                    uniform float latRes;
+                    varying vec2 vUv;
+
+                    // Színátmenet generálása a magasság (0.0 - 1.0) alapján: kék -> sárga -> piros
+                    vec3 getColormap(float t) {
+                        vec3 blue = vec3(0.05, 0.2, 0.6);   
+                        vec3 yellow = vec3(0.8, 0.7, 0.1);  
+                        vec3 red = vec3(0.7, 0.1, 0.05);    
+                        if (t < 0.5) return mix(blue, yellow, t * 2.0);
+                        else return mix(yellow, red, (t - 0.5) * 2.0);
+                    }
+
+                    void main() {
+                        // UV koordináták korrigálása (A fract() törölve lett a varrásmentes ismétlődés miatt)
+                        float correctedUvX = vUv.x - 0.25;
+                        vec2 topoUv = vec2(correctedUvX - topoOffset, vUv.y);
+                        vec2 texUv = vec2(correctedUvX - textureOffset, vUv.y);
+
+                        // Magasság lekérdezése a topográfiai térképről, enyhe elmosással (blur) a pixelesedés ellen
+                        vec2 off = vec2(2.5 / 1024.0, 2.5 / 512.0); 
+                        float h0 = texture2D(tTopo, topoUv).r;
+                        float h1 = texture2D(tTopo, topoUv + vec2(off.x, 0.0)).r;
+                        float h2 = texture2D(tTopo, topoUv - vec2(off.x, 0.0)).r;
+                        float h3 = texture2D(tTopo, topoUv + vec2(0.0, off.y)).r;
+                        float h4 = texture2D(tTopo, topoUv - vec2(0.0, off.y)).r;
+                        float h5 = texture2D(tTopo, topoUv + vec2(off.x, off.y)).r;
+                        float h6 = texture2D(tTopo, topoUv - vec2(off.x, off.y)).r;
+                        float h7 = texture2D(tTopo, topoUv + vec2(off.x, -off.y)).r;
+                        float h8 = texture2D(tTopo, topoUv - vec2(off.x, -off.y)).r;
+                        
+                        float height = (h0*4.0 + (h1+h2+h3+h4)*2.0 + (h5+h6+h7+h8)*1.0) / 16.0; // Átlagolt magasság
+                        
+                        // Magasság lépcsőzetessé tétele a teraszos hatásért (Lépcsők száma alapján)
+                        float steppedHeight = floor(height * steps) / steps;
+                        vec3 topoColor = getColormap(steppedHeight); // Domborzat színének lekérése
+                        vec3 texColor = texture2D(tTexture, texUv).rgb; // Színes fotó textúra lekérése
+
+                        // Szintvonalak (körvonalak) kirajzolása a magassági lépcsők mentén
+                        float currentStep = height * steps;
+                        float dist = fract(currentStep);
+                        dist = min(dist, 1.0 - dist);
+                        float fw = fwidth(currentStep);
+                        float contourAlpha = 1.0 - smoothstep(0.0, fw * 1.5, dist);
+
+                        vec3 finalColor = vec3(0.0);
+
+                        // Rétegek keverése a UI gombok (Topo/Textúra) állapota alapján
+                        if (showTexture > 0.5 && showTopo < 0.5) {
+                            finalColor = texColor; // Csak textúra
+                        } else if (showTopo > 0.5 && showTexture < 0.5) {
+                            finalColor = mix(topoColor, topoColor * 0.3, contourAlpha * 0.4); // Csak domborzat szintvonalakkal
+                        } else if (showTopo > 0.5 && showTexture > 0.5) {
+                            finalColor = mix(texColor, vec3(1.0), contourAlpha * 0.6); // Mindkettő: Textúra fehér szintvonalakkal
+                        }
+
+                        // A felhasználó által kiválasztott magasság (pásztázó vonal) kiemelése
+                        float hlDist = abs(height - highlightLevel);
+                        vec2 grad = vec2(dFdx(height), dFdy(height));
+                        float fwHl = length(grad);
+                        fwHl = max(fwHl, 0.0001); 
+                        
+                        float hlAlpha = 1.0 - smoothstep(0.0, fwHl * hlThick, hlDist);
+                        finalColor = mix(finalColor, hlColor, hlAlpha);
+
+                        // Hosszúsági és szélességi rácsrajzolás ráillesztése a textúrára
+                        if (showGrid > 0.5) {
+                            // Függőleges vonalak (Hosszúság)
+                            float distLon = fract(correctedUvX * lonRes);
+                            distLon = min(distLon, 1.0 - distLon);
+                            float fwX = fwidth(vUv.x * lonRes);
+                            float lonAlpha = 1.0 - smoothstep(0.0, fwX * 1.5, distLon);
+                            finalColor = mix(finalColor, vec3(0.0), lonAlpha * 0.4);
+
+                            // Vízszintes vonalak (Szélesség)
+                            if (latRes > 0.5) {
+                                float latAlpha = 0.0;
+                                if (latRes < 1.5) {
+                                    // Ha a felbontás kicsi, csak az egyenlítőt rajzolja ki
+                                    float eqDist = abs(vUv.y - 0.5);
+                                    float fwEq = fwidth(vUv.y);
+                                    latAlpha = 1.0 - smoothstep(0.0, fwEq * 1.5, eqDist);
+                                } else {
+                                    // Egyébként egyenletesen elosztja a vonalakat, vastagabb egyenlítővel
+                                    float spacing = 1.0 / (latRes + 1.0);
+                                    float distLatFract = fract(vUv.y / spacing);
+                                    float distLat = min(distLatFract, 1.0 - distLatFract);
+                                    float fwY = fwidth(vUv.y / spacing);
+                                    float lAlpha = 1.0 - smoothstep(0.0, fwY * 1.5, distLat);
+                                    
+                                    float eqDist = abs(vUv.y - 0.5);
+                                    float fwEq = fwidth(vUv.y);
+                                    float eqAlpha = 1.0 - smoothstep(0.0, fwEq * 1.5, eqDist);
+                                    
+                                    latAlpha = max(lAlpha * 0.4, eqAlpha * 0.6); 
+                                }
+                                finalColor = mix(finalColor, vec3(0.0), latAlpha);
+                            }
+                        }
+
+                        // A végleges pixel szín kiküldése a képernyőre
+                        gl_FragColor = vec4(finalColor, 1.0);
+                    }
+                `
+            });
+
+            // 128x128-as felbontású 3D gömb geometria létrehozása
+            const geometry = new THREE.SphereGeometry(1, 128, 128);
+            sphere = new THREE.Mesh(geometry, customMaterial);
+            sphere.rotation.y = 0; 
+            marsGroup.add(sphere); 
+            
+            // Töltőképernyő eltüntetése és a kezelőfelületek megjelenítése
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('ui-left').style.display = 'block';
+            document.getElementById('ui-right').style.display = 'block';
+            
+            updateUniforms(); // Kezdeti csúszka értékek beküldése a shaderbe
+        }
+
+        // Térképválasztó (Topo/Textúra) gombok színeinek frissítése az aktív állapot szerint
+        function updateMapButtons() {
+            btnTopoMap.style.background = mapState.topo ? '#4fa4ff' : '#222';
+            btnTopoMap.style.color = mapState.topo ? '#000' : 'white';
+            btnTopoMap.style.borderColor = mapState.topo ? '#4fa4ff' : '#444';
+            
+            btnTextureMap.style.background = mapState.texture ? '#e25822' : '#222';
+            btnTextureMap.style.color = mapState.texture ? '#000' : '#e25822';
+            btnTextureMap.style.borderColor = mapState.texture ? '#e25822' : '#444';
+            
+            if (sphere) {
+                // A shaderben be/ki kapcsoljuk a megfelelő rétegeket
+                sphere.material.uniforms.showTopo.value = mapState.topo ? 1.0 : 0.0;
+                sphere.material.uniforms.showTexture.value = mapState.texture ? 1.0 : 0.0;
+            }
+        }
+
+        // Kattintás a Topo gombra
+        btnTopoMap.onclick = () => {
+            mapState.topo = !mapState.topo;
+            if (!mapState.topo && !mapState.texture) mapState.texture = true; // Ne lehessen mindkettőt kikapcsolni
+            updateMapButtons();
+        };
+
+        // Kattintás a Textúra gombra
+        btnTextureMap.onclick = () => {
+            mapState.texture = !mapState.texture;
+            if (!mapState.topo && !mapState.texture) mapState.topo = true; 
+            updateMapButtons();
+        };
+
+        // Összegyűjti az összes UI csúszka értékét, és frissíti vele a 3D grafikát
+        function updateUniforms() {
+            if(!sphere) return;
+            sphere.material.uniforms.steps.value = parseFloat(stepsSlider.value);
+            document.getElementById('stepsValue').innerHTML = stepsSlider.value;
+
+            const targetVal = parseFloat(targetSlider.value);
+            sphere.material.uniforms.highlightLevel.value = targetVal / 100.0;
+            // Magasság (km) kiszámítása a csúszka százalékából a legalacsonyabb és legmagasabb marsi pont alapján
+            const km = (-8.2 + (targetVal / 100.0) * 29.4).toFixed(1); 
+            document.getElementById('targetLayerValue').innerHTML = km + " km (" + targetVal + "%)";
+
+            sphere.material.uniforms.hlColor.value = hexToRgb(highlightColorPicker.value);
+            sphere.material.uniforms.hlThick.value = 1.0; 
+            
+            sphere.material.uniforms.showGrid.value = showGrid.checked ? 1.0 : 0.0;
+            
+            // Szélességi körök logikája: páratlan számú vonalakra konvertálja a csúszka értékét
+            let latVal = parseInt(latResSlider.value);
+            let newLatRes = latVal === 0 ? 0 : (latVal === 1 ? 1 : latVal * 2 - 1);
+            sphere.material.uniforms.latRes.value = newLatRes;
+            document.getElementById('latResValue').innerHTML = newLatRes;
+            
+            let newLonRes = parseFloat(lonResSlider.value);
+            sphere.material.uniforms.lonRes.value = newLonRes;
+            document.getElementById('lonResValue').innerHTML = newLonRes;
+            
+            // Csak akkor generálja újra a HTML szövegeket, ha a felbontás megváltozott
+            if (newLonRes !== currentLonRes || newLatRes !== currentLatRes) {
+                buildLabels(newLonRes, newLatRes);
+                currentLonRes = newLonRes;
+                currentLatRes = newLatRes;
+            }
+        }
+
+        // Eseménykezelők hozzárendelése a csúszkákhoz (mozgatáskor azonnal lefut az update)
+        stepsSlider.oninput = updateUniforms;
+        targetSlider.oninput = updateUniforms;
+        highlightColorPicker.oninput = updateUniforms;
+        showGrid.onchange = updateUniforms; 
+        latResSlider.oninput = updateUniforms; 
+        lonResSlider.oninput = updateUniforms;
+        showLabels.onchange = () => { }; // Ennek kiértékelése a render ciklusban történik
+        
+        // Leszállóhelyek 3D láthatóságának azonnali vezérlése a jelölőnégyzettel
+        showLanders.onchange = () => { 
+            landerElements.forEach(item => {
+                item.mesh.visible = showLanders.checked;
+            });
+        };
+
+        // Idővonal interakciók és összekötés a 3D-s leszállóhelyekkel
+        const timelineTooltip = document.getElementById('timeline-tooltip');
+        document.querySelectorAll('.timeline-point').forEach(point => {
+            // Amikor az egeret egy évszám fölé húzzuk
+            point.addEventListener('mouseenter', (e) => {
+                timelineTooltip.innerHTML = e.target.getAttribute('data-info'); 
+                timelineTooltip.style.opacity = '1'; 
+                
+                // Tooltip (információs ablak) pozicionálása a pötty fölé
+                const rect = e.target.getBoundingClientRect();
+                timelineTooltip.style.left = (rect.left + rect.width / 2) + 'px';
+                timelineTooltip.style.bottom = (window.innerHeight - rect.top + 15) + 'px';
+
+                // Képernyő szélének ellenőrzése, hogy a szöveg ne lógjon ki a monitorról
+                const ttRect = timelineTooltip.getBoundingClientRect();
+                if (ttRect.right > window.innerWidth - 10) {
+                    timelineTooltip.style.left = (window.innerWidth - ttRect.width / 2 - 10) + 'px';
+                } else if (ttRect.left < 10) {
+                    timelineTooltip.style.left = (ttRect.width / 2 + 10) + 'px';
+                }
+
+                // A megjelölt 3D térképi körlap kiemelése (színcsere narancsra és nagyítás)
+                let idx = e.target.getAttribute('data-index');
+                if (idx) {
+                    landerElements.forEach(l => {
+                        if (l.site.id == idx) {
+                            l.mesh.material.color.setHex(l.mesh.userData.hoverColor);
+                            l.mesh.scale.set(2, 2, 2); 
+                        }
+                    });
+                }
+            });
+            // Amikor levesszük az egeret az évszámról
+            point.addEventListener('mouseleave', (e) => {
+                timelineTooltip.style.opacity = '0'; // Ablak elrejtése
+                
+                // 3D térképi körlapok visszaállítása az eredeti kék színre és méretre
+                let idx = e.target.getAttribute('data-index');
+                if (idx) {
+                    landerElements.forEach(l => {
+                        if (l.site.id == idx) {
+                            l.mesh.material.color.setHex(l.mesh.userData.baseColor);
+                            l.mesh.scale.set(1, 1, 1); 
+                        }
+                    });
+                }
+            });
+        });
+
+        // Változók a kézi tengelykörüli forgatás rögzítéséhez
+        let isDragging = false;
+        let lastMouseX = 0;
+
+        // Egérkattintás érzékelése a 3D vásznon
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            isDragging = true;
+            lastMouseX = e.clientX;
+        });
+        window.addEventListener('pointerup', () => { isDragging = false; });
+        // Egérmozgás lekövetése
+        window.addEventListener('pointermove', (e) => {
+            if (isDragging && lockTilt.checked) {
+                let deltaX = e.clientX - lastMouseX;
+                sphere.rotation.y += deltaX * 0.005; // Csak vízszintesen forgatja a gömböt
+                lastMouseX = e.clientX;
+            }
+        });
+
+        // Tengelyforgás rögzítő gomb működése (kikapcsolja a szabad 3D forgatást)
+        lockTilt.onchange = function() {
+            if (this.checked) {
+                controls.enableRotate = false; 
+            } else {
+                controls.enableRotate = true; 
+            }
+        }
+
+        const MARS_TILT = 25.2 * Math.PI / 180; // Mars valós tengelyferdesége radiánban kifejezve
+
+        // Kamera gyorspozícionáló függvény (Equator, Észak, Dél stb. gombokhoz)
+        function setCameraPosition(x, y, z, isTilted = false) {
+            camera.position.set(x, y, z);
+            if (isTilted) {
+                marsGroup.rotation.z = -MARS_TILT; // Megdönti a bolygócsoportot a marsi dőlésszöggel
+            } else {
+                marsGroup.rotation.z = 0; // Visszaállítja függőlegesre
+            }
+            controls.update(); 
+        }
+
+        // Gyorsnézet gombok eseményei
+        btnEquator.onclick = () => setCameraPosition(0, 0, 3.6, false); 
+        btnTilted.onclick  = () => setCameraPosition(0, 0, 3.6, true);  
+        btnNorth.onclick   = () => setCameraPosition(0, 3.6, 0, false); 
+        btnSouth.onclick   = () => setCameraPosition(0, -3.6, 0, false); 
+
+        let tempVec = new THREE.Vector3(); // Ideiglenes vektor a 3D -> 2D képernyő konverzióhoz
+
+        // A Fő Render Ciklus (Animációs loop, ami másodpercenként 60x lefut)
+        function animate() {
+            requestAnimationFrame(animate); // Meghívja önmagát a következő képkockánál
+
+            // Mobil védelem: Ha 850px alatti a szélesség, megszakítja a renderelést az akku kímélése miatt
+            if (window.innerWidth <= 850) return;
+
+            controls.update(); // Frissíti a kamera pozícióját (ha pörgettük)
+            renderer.render(scene, camera); // Kirajzolja a 3D jelenetet a képernyőre
+
+            // Szélességi és hosszúsági HTML szövegek 3D térbeli követése
+            if (sphere && showLabels.checked && showGrid.checked) {
+                labelElements.forEach(item => {
+                    tempVec.setFromMatrixPosition(item.anchor.matrixWorld); // Lekéri a láthatatlan pont világkoordinátáját
+                    // Ellenőrzi, hogy a pont a bolygó felénk néző oldalán van-e (nem takarja el maga a bolygó)
+                    let isFront = camera.position.distanceTo(tempVec) < camera.position.length(); 
+                    if (isFront) {
+                        item.div.style.opacity = '1';
+                        tempVec.project(camera); // Átszámítja a 3D vektort 2D képernyő koordinátákra (-1 és +1 közé)
+                        let x = (tempVec.x * 0.5 + 0.5) * window.innerWidth;
+                        let y = (tempVec.y * -0.5 + 0.5) * window.innerHeight;
+                        // Pozicionálja a HTML div elemet a számolt pontra
+                        item.div.style.left = x + 'px';
+                        item.div.style.top = y + 'px';
+                    } else {
+                        item.div.style.opacity = '0'; // Ha a túloldalon van, elrejti a szöveget
+                    }
+                });
+            } else if (sphere) {
+                // Ha ki van kapcsolva a UI-ban, mindet elrejti
+                labelElements.forEach(item => item.div.style.opacity = '0'); 
+            }
+        }
+
+        // Program indítása
+        initGlobe();
+        animate();
+
+        // Ha a felhasználó átméretezi a böngésző ablakot, a 3D vászon és a kamera arányai hozzáigazodnak
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
