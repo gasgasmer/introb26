@@ -131,7 +131,7 @@
 
     <div id="uiLayer">
         <h1>Robot Defender</h1>
-        <p>A robot automatikusan, lassan körbeforog.<br>Nyisd ki a szád a lézer elsütéséhez!</p>
+        <p>Irányítás: Döntsd a fejed jobbra-balra a forgáshoz!<br>Nyisd ki a szád a lézer elsütéséhez!</p>
         <button id="startBtn">Kamera engedélyezése és Indítás</button>
     </div>
 
@@ -151,6 +151,7 @@
         let height = window.innerHeight; // Ablak magassága
         gameCanvas.width = width; // Vászon szélesség beállítása
         gameCanvas.height = height; // Vászon magasság beállítása
+        const zoomLevel = 0.6; // Kamera kicsinyítése (nagyobb térrészhez)
 
         // Ablak átméretezésének lekezelése
         window.addEventListener('resize', () => {
@@ -174,6 +175,7 @@
         let activeLaserTimer = 0; // Lézer láthatósági ideje képkockákban
 
         // Vezérlő jelek az AI-tól
+        let currentHeadTilt = 0; // Aktuális simított fejdőlés
         let isMouthOpen = false; // Nyitva van-e a száj
         let mouthLatch = false; // Reteszelő mechanizmus lövéshez (csak egyszer lőjön egy nyitásra)
 
@@ -199,11 +201,21 @@
             if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) { // Ha van detektált arc
                 const landmarks = results.multiFaceLandmarks[0]; // Első arc pontjai
 
-                // Szemek kinyerése csak a debug rajzoláshoz
+                // 1. Fejdőlés számítása (33-as: bal szem, 263-as: jobb szem)
                 const leftEye = landmarks[33];
                 const rightEye = landmarks[263];
+                
+                const dx = leftEye.x - rightEye.x; // X különbség (tükrözve)
+                const dy = rightEye.y - leftEye.y; // Y különbség
+                let tiltAngle = Math.atan2(dy, dx); // Dőlésszög kiszámítása radiánban
+                
+                // Zajszűrés: Pici dőlésnél 0-t adunk, hogy ne remegjen
+                if (Math.abs(tiltAngle) < 0.05) tiltAngle = 0;
+                
+                // Finomítás (Low-pass filter): lágy átmenet a régi és új szög között
+                currentHeadTilt = currentHeadTilt * 0.7 + tiltAngle * 0.3;
 
-                // Szájnyitás számítása
+                // 2. Szájnyitás számítása
                 const upperLip = landmarks[13]; // Felső ajak közepe
                 const lowerLip = landmarks[14]; // Alsó ajak közepe
                 const topHead = landmarks[10]; // Fejtető
@@ -294,19 +306,32 @@
                 activeLaserTimer--;
             }
 
-            // 1. Játékos automatikus forgatása (10 másodperc = fél fordulat = PI radián)
-            // A deltaTime milliszekundumban van, ezért PI / 10000 az osztó
-            player.angle += (Math.PI / 10000) * deltaTime;
+            // 1. Játékos forgatása fejkövetéssel és sebességkorláttal
+            const deadzone = 0.08; // Holtsáv (ebben a tartományban nem forog a gép)
+            if (Math.abs(currentHeadTilt) > deadzone) {
+                let activeTilt = currentHeadTilt - Math.sign(currentHeadTilt) * deadzone; // Hasznos dőlés
+                let desiredRotation = Math.sign(activeTilt) * Math.pow(activeTilt, 2) * 0.8; // Kívánt sebesség
+                
+                // Maximális szögsebesség korlátozása (10 mp / félfordulat = Math.PI / 10000 rad/ms)
+                let maxRotation = (Math.PI / 10000) * deltaTime; 
+                
+                // Sebesség vágása (clamping) a maximumra
+                if (desiredRotation > maxRotation) desiredRotation = maxRotation;
+                if (desiredRotation < -maxRotation) desiredRotation = -maxRotation;
+
+                player.angle += desiredRotation; // Szög frissítése a limitált értékkel
+            }
 
             // 2. Ellenségek generálása
             enemySpawnTimer -= deltaTime; // Időzítő csökkentése
             if (enemySpawnTimer <= 0) {
                 let spawnAngle = Math.random() * Math.PI * 2; // Véletlen irány
-                let spawnDist = Math.max(width, height); // Képernyőn kívülről érkezzenek
+                // A spawn távolságot is megnöveljük a zoom arányával, hogy képernyőn kívülről jöjjenek
+                let spawnDist = Math.max(width, height) / zoomLevel; 
                 enemies.push({
                     x: Math.cos(spawnAngle) * spawnDist, // Kezdő X
                     y: Math.sin(spawnAngle) * spawnDist, // Kezdő Y
-                    speed: 2 + Math.random() * 2, // Véletlen sebesség
+                    speed: 1 + Math.random() * 1, // Felezett véletlen sebesség
                     radius: 25 // Megnövelt méret (narancssárga ellenség)
                 });
                 // Ahogy nő a pontszám, úgy jönnek egyre gyakrabban
@@ -339,7 +364,8 @@
             ctx.strokeStyle = '#333'; // Rács színe
             ctx.lineWidth = 1; // Vonalvastagság
             const gridSize = 100; // Egy rácselem mérete
-            const limit = Math.max(width, height) * 1.5; // Elegendően nagy rács a forgáshoz
+            // A rácsnak a zoom miatt sokkal nagyobbnak kell lennie, hogy kitöltse a képernyőt
+            const limit = Math.max(width, height) * 1.5 / zoomLevel; 
             
             ctx.beginPath();
             for (let i = -limit; i <= limit; i += gridSize) {
@@ -359,6 +385,7 @@
             // ---- VILÁG RAJZOLÁSA (A kamera illúzióhoz) ----
             ctx.save(); // Kontextus elmentése
             ctx.translate(width / 2, height / 2); // Origó mozgatása a képernyő közepére
+            ctx.scale(zoomLevel, zoomLevel); // Kicsinyítés (zoom out) a nagyobb térrészhez
             
             // A világot ellentétesen forgatjuk a játékos szögével, így a gép "felfelé" néz
             ctx.rotate(-player.angle);
@@ -372,13 +399,13 @@
                 ctx.lineWidth = 10; // Lézer vastagsága
                 ctx.beginPath();
                 ctx.moveTo(0, 0); // Lézer indulópontja (játékos)
-                // A lézer hossza kilóg a képernyőről (2000 pixel messze)
-                ctx.lineTo(Math.cos(player.angle - Math.PI / 2) * 2000, Math.sin(player.angle - Math.PI / 2) * 2000);
+                // A lézer hossza kilóg a képernyőről (több ezer pixel messze)
+                ctx.lineTo(Math.cos(player.angle - Math.PI / 2) * 3000, Math.sin(player.angle - Math.PI / 2) * 3000);
                 ctx.stroke(); // Lézer kirajzolása
             }
 
             // Ellenségek rajzolása
-            ctx.fillStyle = '#ff9900'; // Narancssárga szín kérés szerint
+            ctx.fillStyle = '#ff9900'; // Narancssárga szín
             for (let e of enemies) {
                 ctx.beginPath();
                 ctx.arc(e.x, e.y, e.radius, 0, 2 * Math.PI); // Külső test
@@ -397,6 +424,7 @@
             // ---- JÁTÉKOS (ROBOT) RAJZOLÁSA ----
             ctx.save(); // Kontextus elmentése
             ctx.translate(width / 2, height / 2); // Játékos fixen a középpontban
+            ctx.scale(zoomLevel, zoomLevel); // A robotot is lekicsinyítjük a világgal együtt
             
             ctx.fillStyle = '#00ffcc'; // Gép színe
             ctx.fillRect(-15, -15, 30, 30); // Test
